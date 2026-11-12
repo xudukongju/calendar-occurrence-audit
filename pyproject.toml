@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "calendar-occurrence-audit"
+version = "0.1.0a1"
+description = "Offline, bounded comparison of concrete occurrences in two ICS exports"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+dependencies = [
+ "icalendar==7.3.0",
+ "tzdata==2026.6",
+ "recurring-ical-events @ git+https://github.com/niccokunzmann/python-recurring-ical-events.git@7a0bd1d637e4afec389f9b9f32b336020e98634d",
+]
+[project.scripts]
+calendar-occurrence-audit = "calendar_occurrence_audit:main"
+[tool.setuptools]
+py-modules = ["calendar_occurrence_audit"]
