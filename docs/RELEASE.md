@@ -1,11 +1,9 @@
-# Review the appointments, not just the import count
+# Floating 09:00 is not automatically 09:00 UTC
 
-Calendar Occurrence Audit is an offline alpha CLI comparing two ICS exports over an explicit window. One recurring VEVENT can represent many appointments: preserving the record count is not enough to preserve the schedule.
+Version 0.2.0a1 adds side-specific `--before-floating-zone` and `--after-floating-zone` assumptions to the offline occurrence audit. Confirm the interpretation used by each calendar, then compare the resulting appointments without rewriting either export. Both assumptions are recorded in JSON.
 
-The concrete addition over a field diff is a list of missing, added and changed occurrences with UTC-normalized times. Mature `recurring-ical-events` does the expansion; this project adds per-export timezone isolation, identity matching and conservative JSON/exit-code reporting. FindUtils and CalPorter remain useful for broader field inspection, and both detected changes in our baseline comparisons.
+The new workflow distinguishes three cases: valid floating wall time needing context; an explicit but unresolved TZID that must not be silently repaired; and a daylight-saving gap/fold that needs human review. Known UTC/TZID values and all-day dates keep their original meaning. Defaults retain the previous strict behavior.
 
-Includes synthetic examples, cancellation/moved-exception/BYSETPOS/THISANDFUTURE tests, input limits, timeout handling and private-error suppression. Installation needs Python 3.10+ and Git: an immutable upstream commit is pinned because the published stable dependency still fails one regression. Audits after installation are offline.
+A 09:00 floating event can compare equal to Berlin 09:00 under the Berlin assumption, or reveal a time shift when the destination used New York. Recurrence exceptions and local UNTIL values receive the same context. Generated DST ambiguities remain inconclusive. This is conditional auditing, not an importer fix or a guarantee that a guessed zone is correct.
 
-Scope: times, titles and locations within the selected window. Review attendees, alarms and permissions separately. Do not delete the source calendar based solely on an equal report.
-
-Author: xudukongju; research, implementation and tests are AI-assisted. External usage and time savings have not been measured.
+[Research and alternatives](https://github.com/xudukongju/calendar-occurrence-audit/blob/v0.2.0a1/docs/RESEARCH.md). Python/Git installation and the pinned upstream dependency are unchanged. Author: xudukongju; AI-assisted research, implementation and tests. External adoption remains unconfirmed.

@@ -35,11 +35,24 @@ A recurring series can still be one VEVENT after dozens of appointments are lost
 
 For inspecting **all ICS fields**, use [FindUtils ICS Diff](https://findutils.com/convert/ics-diff/) or [CalPorter](https://calporter.com/tools/compare-ics/). Both detected important changes in our comparisons. This CLI adds bounded occurrence consequences and machine-readable exit codes; it is not a replacement for their broader field inspection. [Evidence and comparison](docs/RESEARCH.md).
 
+## Audit an explicitly interpreted floating-time export
+
+A floating 09:00 has no fixed UTC instant. If you have confirmed which zone each system used, supply it **per export** instead of editing the original files:
+
+```sh
+calendar-occurrence-audit source.ics destination.ics --from 2026-03-01 --to 2026-05-01 \
+  --before-floating-zone Europe/Berlin --after-floating-zone America/New_York
+```
+
+These are assumptions for this audit, not recovered timezone facts. The JSON records both assumptions. A single floating 09:00 interpreted in those two zones is reported as changed. Existing UTC/TZID values and all-day dates are not reinterpreted; unknown explicit TZIDs remain errors. Without flags, floating times still return inconclusive.
+
+Local UNTIL limits, RDATE/EXDATE and moved exceptions use the same side-specific context. Assumed times in a daylight-saving gap or fold, including generated occurrences, return inconclusive rather than choosing an offset. For truly floating schedules that follow the viewer wherever they travel, an instant comparison may be the wrong question: keep a field-level/wall-clock review instead.
+
 ## Interpretation and limits
 
 Only start/end, title and location are compared. Attendees, descriptions, alarms, attachments, permissions, and dates outside the window still require review. Equal empty windows do not prove an entire migration succeeded. Rewritten UIDs appear as removed/added; there is no guessed fuzzy pairing. Changes to a recurrence schedule can similarly appear as removed/added identities.
 
-Floating/unresolved time zones, conflicting duplicate identities, unsupported components, parse failures and resource limits produce an inconclusive result, never a successful equality verdict. Embedded VTIMEZONE definitions take precedence over host definitions. Output contains event details: keep reports private and redact before posting an issue. Inputs remain unchanged.
+Floating times without explicit assumptions, unresolved time zones, conflicting duplicate identities, unsupported components, parse failures and resource limits produce an inconclusive result, never a successful equality verdict. Embedded VTIMEZONE definitions take precedence over host definitions. Output contains event details: keep reports private and redact before posting an issue. Inputs remain unchanged.
 
 ## Dependency decision
 

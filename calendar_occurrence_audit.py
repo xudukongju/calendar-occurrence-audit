@@ -10,6 +10,7 @@ import multiprocessing as mp
 import math
 from pathlib import Path
 import sys
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import icalendar
 from icalendar import timezone
 import recurring_ical_events
@@ -27,7 +28,49 @@ def value_key(value):
         return 'date:' + value.isoformat()
     raise Inconclusive('Unsupported calendar time value')
 
-def expand(text, start, end, limit=10000, series_uids=None):
+def bind_wall_time(value, zone):
+    """Resolve only an explicit user assumption; reject DST gaps and folds."""
+    wall = value.replace(tzinfo=None)
+    instants = {wall.replace(tzinfo=zone, fold=fold).astimezone(UTC)
+                for fold in (0, 1)
+                if wall.replace(tzinfo=zone, fold=fold).astimezone(UTC).astimezone(zone).replace(tzinfo=None) == wall}
+    if len(instants) != 1:
+        raise Inconclusive('Assumed floating time is ambiguous or nonexistent at a DST transition; review the source.')
+    return wall.replace(tzinfo=zone)
+
+def bind_floating(cal, zone_name):
+    if zone_name is None:
+        return None, set()
+    try:
+        zone = ZoneInfo(zone_name)
+    except (ZoneInfoNotFoundError, ValueError):
+        raise Inconclusive('Unknown floating-time assumption; use an IANA time zone.')
+    floating_uids = set()
+    for event in cal.walk('VEVENT'):
+        bound_start = False
+        for name in ('DTSTART', 'DTEND', 'RECURRENCE-ID', 'RDATE', 'EXDATE'):
+            props = event.get(name, [])
+            if not isinstance(props, list): props = [props]
+            for prop in props:
+                values = prop.dts if name in ('RDATE', 'EXDATE') else [prop]
+                for item in values:
+                    def bind(value):
+                        nonlocal bound_start
+                        if isinstance(value, dt.datetime) and value.tzinfo is None:
+                            if prop.params.get('TZID') or getattr(item, 'params', {}).get('TZID'):
+                                raise Inconclusive('Unresolved explicit TZID cannot be replaced by a floating-time assumption.')
+                            floating_uids.add(str(event.get('UID', '')))
+                            if name == 'DTSTART': bound_start = True
+                            return bind_wall_time(value, zone)
+                        return value
+                    item.dt = tuple(bind(v) for v in item.dt) if isinstance(item.dt, tuple) else bind(item.dt)
+        if bound_start and 'RRULE' in event and 'UNTIL' in event['RRULE']:
+            event['RRULE']['UNTIL'] = [bind_wall_time(v, zone).astimezone(UTC)
+                if isinstance(v, dt.datetime) and v.tzinfo is None else v
+                for v in event['RRULE']['UNTIL']]
+    return zone, floating_uids
+
+def expand(text, start, end, limit=10000, series_uids=None, floating_zone=None):
     if len(text) > 5 * 1024 * 1024:
         raise Inconclusive('Input exceeds 5 MiB')
     # The parser's default global cache can make the second file reuse the first
@@ -45,6 +88,7 @@ def expand(text, start, end, limit=10000, series_uids=None):
     cal = icalendar.Calendar.from_ical(text)
     if cal.name != 'VCALENDAR':
         raise Inconclusive('Expected VCALENDAR')
+    assumed_zone, floating_uids = bind_floating(cal, floating_zone)
     identities = set()
     if series_uids is None:
         series_uids = {str(e.get('UID','')) for e in cal.walk('VEVENT') if any(k in e for k in ('RRULE','RDATE','EXDATE','RECURRENCE-ID'))}
@@ -102,6 +146,10 @@ def expand(text, start, end, limit=10000, series_uids=None):
         if str(event.get('STATUS', '')).upper() == 'CANCELLED':
             continue
         uid = str(event['UID'])
+        if uid in floating_uids:
+            for prop in ('DTSTART', 'DTEND', 'RECURRENCE-ID'):
+                if prop in event and isinstance(event[prop].dt, dt.datetime) and event[prop].dt.tzinfo == assumed_zone:
+                    bind_wall_time(event[prop].dt, assumed_zone)
         rid = event.get('RECURRENCE-ID', event['DTSTART']).dt
         original = value_key(rid) if uid in series_uids else None
         key = (uid, original or 'single')
@@ -114,7 +162,7 @@ def expand(text, start, end, limit=10000, series_uids=None):
                      'location': str(event.get('LOCATION', ''))}
     return rows
 
-def audit(before, after, start, end, limit=10000):
+def audit(before, after, start, end, limit=10000, before_floating_zone=None, after_floating_zone=None):
     if not start < end:
         raise Inconclusive('The end must be after the start')
     series_uids = set()
@@ -123,7 +171,7 @@ def audit(before, after, start, end, limit=10000):
             raise Inconclusive('Input exceeds 5 MiB')
         series_uids.update(str(e.get('UID','')) for e in icalendar.Calendar.from_ical(text).walk('VEVENT')
                            if any(k in e for k in ('RRULE','RDATE','EXDATE','RECURRENCE-ID')))
-    left, right = expand(before, start, end, limit, series_uids), expand(after, start, end, limit, series_uids)
+    left, right = expand(before, start, end, limit, series_uids, before_floating_zone), expand(after, start, end, limit, series_uids, after_floating_zone)
     missing = [left[k] for k in sorted(left.keys() - right.keys())]
     added = [right[k] for k in sorted(right.keys() - left.keys())]
     changed = [{'before': left[k], 'after': right[k],
@@ -131,6 +179,7 @@ def audit(before, after, start, end, limit=10000):
                for k in sorted(left.keys() & right.keys()) if left[k] != right[k]]
     return {'status': 'different' if missing or added or changed else 'equal_in_window',
             'window': {'from_inclusive': str(start), 'to_exclusive': str(end), 'timed_zone':'UTC', 'all_day':'calendar dates'},
+            'floating_time_assumptions': {'before': before_floating_zone, 'after': after_floating_zone},
             'counts': {'before':len(left), 'after':len(right), 'missing':len(missing),'added':len(added),'changed':len(changed)},
             'missing':missing,'added':added,'changed':changed,
             'scope':'Concrete event times, title and location only; no attendee, alarm, attachment or permission audit. Stable UID required; rewritten IDs are not guessed.'}
@@ -145,7 +194,7 @@ def read_bounded(path):
 def worker(conn, args):
     try:
         result = audit(read_bounded(args.before), read_bounded(args.after),
-                       dt.date.fromisoformat(args.start), dt.date.fromisoformat(args.end), args.max_occurrences)
+                       dt.date.fromisoformat(args.start), dt.date.fromisoformat(args.end), args.max_occurrences, args.before_floating_zone, args.after_floating_zone)
         conn.send(result)
     except Exception as error:
         # Parse errors may contain private source text; do not dump tracebacks.
@@ -158,6 +207,8 @@ def main():
     parser.add_argument('before'); parser.add_argument('after')
     parser.add_argument('--from', dest='start', required=True)
     parser.add_argument('--to', dest='end', required=True)
+    parser.add_argument('--before-floating-zone', help='Explicit IANA zone assumption for floating times in BEFORE only')
+    parser.add_argument('--after-floating-zone', help='Explicit IANA zone assumption for floating times in AFTER only')
     parser.add_argument('--max-occurrences', type=int, default=10000)
     parser.add_argument('--timeout', type=float, default=20)
     args = parser.parse_args()

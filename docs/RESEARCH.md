@@ -32,3 +32,13 @@ Stable recurring-ical-events 3.8.2 failed THISANDFUTURE occurrence identity. Its
 UID rewriting is not recoverable by this matching contract: unmatched records remain added/removed. A finite window cannot verify an infinite calendar. Missing all data outside the selected window is not detected. These limits appear in the command's output and README.
 
 Additional adversarial check: an unresolved TZID on RDATE was silently treated by the expansion library as an ordinary date. The integration now validates RDATE/EXDATE times before expansion and rejects unresolved/floating values, including period endpoints. This prevents a false equal verdict.
+
+## 2026-11-13: explicit floating-time interpretation
+
+[Proton user's original question](https://www.reddit.com/r/ProtonMail/comments/1o6i086/floating_times_not_supported/) asks why two attached calendars cannot be imported. The support reply explains missing timezone context and offers manual import or asking the sender; another person reports continuing to see it in 5.0.97.7 beta. Dates are relative on the page; we do not infer current-version failure. This is an existing workaround, not a claim that no importer can handle floating time.
+
+[RFC 5545 §3.3.5](https://www.rfc-editor.org/rfc/rfc5545#section-3.3.5) distinguishes floating time from fixed instants. The new contribution is auditing the effects of an explicitly confirmed interpretation on each side, not inventing the missing zone. A malformed explicit TZID is kept distinct from absence of TZID.
+
+The prior release rejects these inputs entirely. The existing FindUtils field-diff baseline compares timestamp text without zone normalization; it is useful for wall-clock changes but cannot establish equality of instants under two supplied interpretations. Under a Berlin assumption the synthetic floating 09:00 and Berlin 09:00 now compare equal; Berlin versus New York interpretations produce one changed appointment. No user time-saving percentage is claimed.
+
+The strongest basic alternative is to attach a zone using Python ZoneInfo and then use the existing recurrence engine. Direct `replace(tzinfo=ZoneInfo(...))` accepts both DST gaps and folds without prompting. The integration adds round-trip validation and checks generated occurrences, per-side context and recorded assumptions, while leaving source files untouched. Rejecting an ambiguous assumption is an audit decision, not a claim that RFC-defined explicit zoned values are invalid. Truly floating travel-following schedules still need wall-clock review rather than a fixed-zone migration assertion.

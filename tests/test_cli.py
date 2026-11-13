@@ -32,4 +32,11 @@ class CLITests(unittest.TestCase):
   with tempfile.TemporaryDirectory() as d:
    p=Path(d)/'private.ics';p.write_text('PRIVATE_CALENDAR_CONTENT');a=self.args();a[0]=p
    r=self.run_audit(*a);self.assertEqual(r.returncode,2);self.assertNotIn('PRIVATE_CALENDAR_CONTENT',r.stdout+r.stderr)
+ def test_floating_flags_record_context_without_editing_input(self):
+  before=ROOT/'examples/before-floating.ics';after=ROOT/'examples/before-exdate.ics'
+  original=before.read_bytes()
+  r=self.run_audit(before,after,'--from','2026-03-01','--to','2026-05-01','--before-floating-zone','Europe/Berlin')
+  self.assertEqual(r.returncode,0)
+  self.assertEqual(json.loads(r.stdout)['floating_time_assumptions'],{'before':'Europe/Berlin','after':None})
+  self.assertEqual(before.read_bytes(),original)
 if __name__=='__main__':unittest.main()
